@@ -2,6 +2,10 @@ package mapreduce
 
 import (
 	"hash/fnv"
+	"os"
+	"io/ioutil"
+	"encoding/json"
+	"log"
 )
 
 // doMap manages one map task: it reads one of the input files
@@ -53,6 +57,36 @@ func doMap(
 	//
 	// Remember to close the file after you have written all the values!
 	//
+	// 1. read file
+	contents, err := ioutil.ReadFile(inFile)
+	if err != nil {
+		log.Fatalf("Failed to read file %s\n", inFile)
+	}
+
+	mapResults := mapF(inFile, string(contents))
+
+	// create the json Encoder for each file
+	encoders := make([]*json.Encoder, nReduce)
+
+	// 2. partitions the output into nReduce intermediate files
+	for i:=0; i<nReduce; i++ {
+		fname := reduceName(jobName, mapTaskNumber, i)
+		fh, err := os.Create(fname)
+		defer fh.Close()
+		if err != nil {
+			log.Fatalf("Failed to Open file %s", fname)
+		}
+		encoders[i] = json.NewEncoder(fh)
+	}
+
+	// 
+	for _, kv := range mapResults {
+		idx := ihash(kv.Key) % nReduce
+		err := encoders[idx].Encode(&kv)
+		if err != nil {
+			log.Fatalf("Failed to encode: %s to file", kv)
+		}
+	}
 }
 
 func ihash(s string) int {
