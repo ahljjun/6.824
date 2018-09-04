@@ -21,8 +21,8 @@ func mapF(filename string, contents string) []mapreduce.KeyValue {
 	
 	// 1. key - word 
 	// 2. val - cnt
-	//res := make([]mapreduce.KeyValue)
-	var res []mapreduce.KeyValue
+	res := make([]mapreduce.KeyValue, 0)
+	//var res []mapreduce.KeyValue
 
     strArray := strings.FieldsFunc(contents, func(c rune) bool {
 		return !unicode.IsLetter(c)
