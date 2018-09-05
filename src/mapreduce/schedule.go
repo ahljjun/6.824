@@ -1,6 +1,25 @@
 package mapreduce
 
-import "fmt"
+import (
+	"fmt"
+	"sync"
+)
+
+type WorkerPool struct {
+	sync.Mutex
+	// protected by the mutex
+	cond *sync.Cond // signals when Register() adds to workers[]
+	workers []string
+}
+
+// newMaster initializes a new Map/Reduce Master
+func NewWorkerPool() (wp *WorkerPool) {
+	wp = new(WorkerPool)
+	wp.workers = make([]string, 0)
+	wp.cond = sync.NewCond(wp)
+	return
+}
+
 
 //
 // schedule() starts and waits for all tasks in the given phase (Map
@@ -32,5 +51,66 @@ func schedule(jobName string, mapFiles []string, nReduce int, phase jobPhase, re
 	//
 	// TODO TODO TODO TODO TODO TODO TODO TODO TODO TODO TODO TODO TODO
 	//
+
+	wpool := WorkerPool{workers: make([]string, 0)}
+
+	// assign task 
+	var wg sync.WaitGroup
+
+	// add new worker
+	addWorker := func() {
+		defer wg.Done()
+		for {
+			select {
+			case wname := <- registerChan :
+				wpool.Lock()
+				wpool.workers = append(wpool.workers, wname)
+				wpool.cond.Broadcast()
+				wpool.Unlock()
+			case <- registerChan: // for close channel signal
+				return
+			}
+		}
+	}
+
+	runTask := func(worker string, taskArgs *DoTaskArgs) {
+		call(worker, "Worker.DoTask", taskArgs, nil)
+		wpool.Lock()
+		wpool.workers = append(wpool.workers, worker)
+		wpool.cond.Broadcast()
+		wpool.Unlock()
+	}
+
+	// assign task goroutine
+	assignTask := func() {
+		defer wg.Done()
+		//  this function take 
+		i := 0
+		for i < ntasks {
+			wpool.Lock()
+			if len(wpool.workers) > 0 {
+				for _, w := range wpool.workers {
+					taskArgs := DoTaskArgs{JobName: jobName, File: mapFiles[i], Phase: phase,
+						TaskNumber: i, NumOtherPhase: n_other}
+	
+					go runTask(w, &taskArgs)
+					i++
+					if  i == ntasks  {
+						break
+					}
+				}
+				wpool.workers = nil
+			} else {
+				wpool.cond.Wait()
+			}
+			wpool.Unlock()
+		}
+	}
+
+	wg.Add(2)
+	go addWorker()
+	go assignTask()
+	
+	wg.Wait()
 	fmt.Printf("Schedule: %v phase done\n", phase)
 }
