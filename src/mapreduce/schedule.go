@@ -8,7 +8,7 @@ import (
 type WorkerPool struct {
 	sync.Mutex
 	// protected by the mutex
-	cond *sync.Cond // signals when Register() adds to workers[]
+	cond    *sync.Cond // signals when Register() adds to workers[]
 	workers []string
 }
 
@@ -17,9 +17,8 @@ func NewWorkerPool() (wp *WorkerPool) {
 	wp = new(WorkerPool)
 	wp.workers = make([]string, 0)
 	wp.cond = sync.NewCond(wp)
-	return
+	return wp
 }
-
 
 //
 // schedule() starts and waits for all tasks in the given phase (Map
@@ -52,22 +51,23 @@ func schedule(jobName string, mapFiles []string, nReduce int, phase jobPhase, re
 	// TODO TODO TODO TODO TODO TODO TODO TODO TODO TODO TODO TODO TODO
 	//
 
-	wpool := WorkerPool{workers: make([]string, 0)}
+	wpool := NewWorkerPool()
 
-	// assign task 
+	// assign task
 	var wg sync.WaitGroup
 
 	// add new worker
 	addWorker := func() {
-		defer wg.Done()
+		//defer wg.Done()
 		for {
 			select {
-			case wname := <- registerChan :
+			case wname := <-registerChan:
 				wpool.Lock()
+				fmt.Printf("add worker %s to workpool\n", wname)
 				wpool.workers = append(wpool.workers, wname)
 				wpool.cond.Broadcast()
 				wpool.Unlock()
-			case <- registerChan: // for close channel signal
+			case <-registerChan: // for close channel signal
 				return
 			}
 		}
@@ -84,7 +84,7 @@ func schedule(jobName string, mapFiles []string, nReduce int, phase jobPhase, re
 	// assign task goroutine
 	assignTask := func() {
 		defer wg.Done()
-		//  this function take 
+		//  this function take
 		i := 0
 		for i < ntasks {
 			wpool.Lock()
@@ -92,10 +92,11 @@ func schedule(jobName string, mapFiles []string, nReduce int, phase jobPhase, re
 				for _, w := range wpool.workers {
 					taskArgs := DoTaskArgs{JobName: jobName, File: mapFiles[i], Phase: phase,
 						TaskNumber: i, NumOtherPhase: n_other}
-	
+
+					fmt.Printf("run task on worker %s\n", w)
 					go runTask(w, &taskArgs)
 					i++
-					if  i == ntasks  {
+					if i == ntasks {
 						break
 					}
 				}
@@ -107,10 +108,12 @@ func schedule(jobName string, mapFiles []string, nReduce int, phase jobPhase, re
 		}
 	}
 
-	wg.Add(2)
+	wg.Add(1)
 	go addWorker()
 	go assignTask()
-	
+	//fmt.Printf("Wait for task complete\n")
 	wg.Wait()
+	fmt.Printf("close Chan\n")
+	close(registerChan)
 	fmt.Printf("Schedule: %v phase done\n", phase)
 }
